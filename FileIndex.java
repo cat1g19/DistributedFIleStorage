@@ -1,12 +1,10 @@
 import java.net.Socket;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Vector;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.stream.Collectors;
 
 public class FileIndex {
     //private Controller controller;
@@ -20,7 +18,7 @@ public class FileIndex {
     private ReentrantReadWriteLock updateLock = new ReentrantReadWriteLock(true);
     // map filename to their state in the index (eg. STORE_IN_PROGRESS, STORE_COMPLETE, REMOVE_IN_PROGRESS)
     private ConcurrentHashMap<String,IndexState> fileToState = new ConcurrentHashMap<>();
-    //private ConcurrentHashMap<String,Long> fileToStateTimer = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<String,Long> fileToStateTimer = new ConcurrentHashMap<>();
     // map filename to their file size
     private ConcurrentHashMap<String,Integer> fileToSize = new ConcurrentHashMap<>();
     // map filename to the list of dstores storing them
@@ -62,12 +60,13 @@ public class FileIndex {
 
     public void storeFile(String filename, int filesize, Socket clientSocket, List<Socket> storingDataStores){
         fileToState.put(filename, IndexState.STORE_IN_PROGRESS);
-        //fileToStateTimer.put(filename, System.currentTimeMillis());
+        fileToStateTimer.put(filename, System.currentTimeMillis());
         fileToSize.put(filename,filesize);
         filesToDstores.put(filename, new Vector<>());
         //filesToStateClients.put(filename, new Vector<>(Arrays.asList(clientSocket)));
         filesToStateClients.put(filename, clientSocket);
         filesToAcks.put(filename,new AtomicInteger(storingDataStores.size()));
+        incrementDstores(storingDataStores);
     }
 
     public void loadFile(String fileName, Socket clientSocket, Socket dstoreSocket) {
@@ -87,17 +86,96 @@ public class FileIndex {
 
     public void removeFile(String fileName, Socket clientSocket, List<Socket> storingDstores){
         fileToState.put(fileName, IndexState.REMOVE_IN_PROGRESS);
-        //this.stateTimers.put(fileName, System.currentTimeMillis());
+        fileToStateTimer.put(fileName, System.currentTimeMillis());
         fileToSize.remove(fileName);
         dstoresToFiles.values().forEach(fileList -> fileList.remove(fileName));
         //filesToStateClients.put(fileName, new Vector<>(Arrays.asList(clientSocket)));
         filesToStateClients.put(fileName, clientSocket);
         filesToDstores.remove(fileName);
         filesToAcks.put(fileName, new AtomicInteger(storingDstores.size()));
+        decrementDstores(storingDstores);
     }
 
     public boolean containsFile(String filename){
         return fileToState.contains(filename);
+    }
+
+    public void updateDstores(Socket dstore){
+        for (Socket ds : dstoresToFiles.keySet()){
+            if (ds == dstore){
+                dstoresToFiles.remove(ds);
+            }
+        }
+
+        for (String file : filesToDstores.keySet()){
+            for (Socket ds : filesToDstores.get(file)){
+                if (ds == dstore){
+                    filesToDstores.get(file).remove(ds);
+                }
+            }
+        }
+
+        for (Socket ds : dstoresToNoOfFiles.keySet()){
+            if (ds == dstore){
+                dstoresToNoOfFiles.remove(ds);
+            }
+        }
+    }
+
+    public void incrementDstores(List<Socket> dstores){
+        for (Socket ds : dstores){
+            dstoresToNoOfFiles.put(ds,dstoresToNoOfFiles.get(ds) + 1);
+        }
+    }
+
+    public void decrementDstores(List<Socket> dstores){
+        for (Socket ds : dstores){
+            dstoresToNoOfFiles.put(ds,dstoresToNoOfFiles.get(ds) - 1);
+        }
+    }
+
+    public void update(){
+        long currentTime = System.currentTimeMillis();
+        List<String> expiredFiles = fileToStateTimer.entrySet().stream()
+                     .filter(entry -> currentTime - entry.getValue() >= timeout)
+                     .collect(Collectors.mapping(Map.Entry::getKey, Collectors.toList()));
+
+        /**Sets expired states back to the default state.*/
+        expiredFiles.forEach(file -> expireState(file, fileToState.get(file)));
+    }
+
+    public void expireState(String filename, IndexState state){
+        if (state != null) {
+            switch (state) {
+                case STORE_IN_PROGRESS:
+                    fileToState.remove(filename);
+                    fileToSize.remove(filename);
+                    filesToDstores.remove(filename);
+                    updateDstoresNoOfFiles(filename);
+                    dstoresToFiles.values().forEach(fileList -> fileList.remove(filename));
+                    filesToAcks.remove(filename);
+                    System.out.println("STORE OP HAS EXPIRED");
+                    break;
+                case REMOVE_IN_PROGRESS:
+                    fileToState.remove(filename);
+                    filesToAcks.remove(filename);
+                    System.out.println("REMOVE OP HAS EXPIRED");
+                    break;
+                default:
+                    throw new IllegalArgumentException("Cannot expire a file in the STORE_COMPLETE state!");
+            }
+        }
+
+        filesToStateClients.remove(filename);
+        fileToStateTimer.remove(filename);
+    }
+
+    public void updateDstoresNoOfFiles(String filename){
+        for (Socket ds : dstoresToFiles.keySet()){
+            if (dstoresToFiles.get(ds).contains(filename)){
+                dstoresToNoOfFiles.put(ds, dstoresToNoOfFiles.get(ds) - 1);
+            }
+        }
     }
 
     public ReentrantReadWriteLock getUpdateLock(){

@@ -7,8 +7,10 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
@@ -43,7 +45,7 @@ public class Controller {
                     System.out.println("Server running, awaits connections");
                     Socket client = serverSocket.accept();
                     //client.setSoTimeout(timeout);
-                    System.out.println("Port " + client.getPort());
+                    //System.out.println("Port " + client.getPort());
                     new Thread(new Runnable() {
                         @Override
                         public void run() {
@@ -55,7 +57,7 @@ public class Controller {
 
                                 String message;
                                 while ((message = bufferedReader.readLine()) != null) {
-                                    System.out.println(message + " message received");
+                                    //System.out.println(message + " message received");
                                     String[] messageParts = message.split(" ");
 
                                     Lock readLock = fileIndex.getUpdateLock().readLock();
@@ -65,90 +67,90 @@ public class Controller {
                                         // dataStore joining the system
                                         case (Protocol.JOIN_TOKEN):
                                             writeLock.lock();
-                                            System.out.println("WriterLock has been locked");
+                                            //System.out.println("WriterLock has been locked");
                                             try {
                                                 dstoreJoins(client, messageParts);
                                                 System.out.println("dstoreJoins");
                                             } finally {
                                                 writeLock.unlock();
-                                                System.out.println("WriterLock has been unlocked");
+                                                //System.out.println("WriterLock has been unlocked");
                                             }
                                             break;
                                         case (Protocol.STORE_TOKEN):
                                             writeLock.lock();
-                                            System.out.println("WriteLock has been locked");
+                                            //System.out.println("WriteLock has been locked");
                                             try {
                                                 storeFile(client, messageParts);
                                                 System.out.println("storeFile");
                                             } finally {
                                                 writeLock.unlock();
-                                                System.out.println("WriteLock has been unlocked");
+                                                //System.out.println("WriteLock has been unlocked");
                                             }
                                             break;
                                         case (Protocol.STORE_ACK_TOKEN):
                                             writeLock.lock();
-                                            System.out.println("WriteLock has been locked");
+                                            //System.out.println("WriteLock has been locked");
                                             try {
                                                 storeAck(client, messageParts);
                                                 System.out.println("storeAck");
                                             } finally {
                                                 writeLock.unlock();
-                                                System.out.println("WriteLock has been unlocked");
+                                                //System.out.println("WriteLock has been unlocked");
                                             }
                                             break;
                                         case (Protocol.LOAD_TOKEN):
                                             readLock.lock();
-                                            System.out.println("ReadLock has been locked");
+                                            //System.out.println("ReadLock has been locked");
                                             try {
                                                 loadFile(client, messageParts);
                                                 System.out.println("loadFile");
                                             } finally {
                                                 readLock.unlock();
-                                                System.out.println("ReadLock has been unlocked");
+                                                //System.out.println("ReadLock has been unlocked");
                                             }
                                             break;
                                         case (Protocol.RELOAD_TOKEN):
                                             readLock.lock();
-                                            System.out.println("ReadLock has been locked");
+                                            //System.out.println("ReadLock has been locked");
                                             try {
                                                 reloadFile(client, messageParts);
                                                 System.out.println("reloadFile");
                                             } finally {
                                                 readLock.unlock();
-                                                System.out.println("ReadLock has been unlocked");
+                                                //System.out.println("ReadLock has been unlocked");
                                             }
                                             break;
                                         case (Protocol.LIST_TOKEN):
                                             readLock.lock();
-                                            System.out.println("ReadLock has been locked");
+                                            //System.out.println("ReadLock has been locked");
                                             try {
                                                 listFiles(client, messageParts);
                                                 System.out.println("listFiles");
                                             } finally {
                                                 readLock.unlock();
-                                                System.out.println("ReadLock has been unlocked");
+                                                //System.out.println("ReadLock has been unlocked");
                                             }
                                             break;
                                         case (Protocol.REMOVE_TOKEN):
                                             writeLock.lock();
-                                            System.out.println("WriteLock has been locked");
+                                            //System.out.println("WriteLock has been locked");
                                             try {
                                                 removeFile(client, messageParts);
                                                 System.out.println("removeFile");
                                             } finally {
                                                 writeLock.unlock();
-                                                System.out.println("WriteLock has been unlocked");
+                                                //System.out.println("WriteLock has been unlocked");
                                             }
                                             break;
                                         case (Protocol.REMOVE_ACK_TOKEN):
                                             writeLock.lock();
-                                            System.out.println("WriteLock has been locked");
+                                            //System.out.println("WriteLock has been locked");
                                             try {
                                                 removeAck(client, messageParts);
                                                 System.out.println("removeAck");
                                             } finally {
                                                 writeLock.unlock();
-                                                System.out.println("WriteLock has been unlocked");
+                                                //System.out.println("WriteLock has been unlocked");
                                             }
                                             break;
                                         default:
@@ -197,8 +199,8 @@ public class Controller {
                     StringBuilder clientResponse = new StringBuilder(Protocol.STORE_TO_TOKEN);
                     Vector<Socket> allocatedDstores = new Vector<>();
 
-                    fileIndex.getDstoresToFiles().entrySet().stream()
-                            .sorted(Comparator.comparingInt(entry -> entry.getValue().size()))
+                    fileIndex.getDstoresToNoOfFiles().entrySet().stream()
+                            .sorted(Comparator.comparingInt(entry -> entry.getValue()))
                             .limit(replicationFactor)
                             .forEach(entry -> {
                                 allocatedDstores.add(entry.getKey());
@@ -241,6 +243,7 @@ public class Controller {
                 /**Updates the index and decrements the required acknowledgements.*/
                 fileIndex.getFilesToDstores().get(fileName).add(dstoreSocket);
                 fileIndex.getDstoresToFiles().get(dstoreSocket).add(fileName);
+                fileIndex.getDstoresToNoOfFiles().put(dstoreSocket,fileIndex.getDstoresToFiles().get(dstoreSocket).size());
 
                 /**Checks if an appropriate number of STORE_ACKs have been processed.
                  * If so, updates the state of the file to the default state in the file index.*/
@@ -470,7 +473,16 @@ public class Controller {
     }
 
     public static boolean enoughDstores(){
-        return dstoreSocketToPortNo.size() >= replicationFactor;
+        int n = 0;
+        for (Socket dstore : dstoreSocketToPortNo.keySet()){
+            if (!dstore.isClosed() && dstore.isConnected()){
+                n++;
+            } else{
+                dstoreSocketToPortNo.remove(dstore);
+                fileIndex.updateDstores(dstore);
+            }
+        }
+        return n >= replicationFactor;
     }
 
     public static void sendNotEnoughDstores(PrintWriter clientWriter, Socket clientSocket){
@@ -486,5 +498,12 @@ public class Controller {
         this.replicationFactor = replicationFactor;
         this.fileIndex = new FileIndex(timeout, rebalancePeriod);
         this.rebalancePeriod = rebalancePeriod;
+
+        /**Starts the update thread.*/
+        new Thread(() -> {
+            while(!Thread.interrupted()) {
+                fileIndex.update();
+            }
+        }).start();
     }
 }

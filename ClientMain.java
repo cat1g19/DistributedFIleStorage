@@ -20,6 +20,9 @@ public class ClientMain {
 		//testClient(cport, timeout, downloadFolder);
 
 
+
+		test1(cport, timeout, downloadFolder, uploadFolder);
+		/*
 		// example to launch a number of concurrent clients, each doing the same operations
 		for (int i = 0; i < 10; i++) {
 			new Thread() {
@@ -28,6 +31,8 @@ public class ClientMain {
 				}
 			}.start();
 		}
+
+		 */
 
 	}
 	
@@ -50,12 +55,18 @@ public class ClientMain {
 					e.printStackTrace();
 				}
 			}
+
+			try {
+				Thread.sleep(3000);
+			} catch (Exception e){
+				System.out.println("Error " + e);
+			}
 			
 			String list[] = null;
 			try { list = list(client); } catch(IOException e) { e.printStackTrace(); }
 
 			// /4
-			for (int i = 0; i < list.length/4; i++) {
+			for (int i = 0; i < list.length; i++) {
 				String fileToRemove = list[random.nextInt(list.length)];
 				try {
 					client.remove(fileToRemove);
@@ -123,5 +134,70 @@ public class ClientMain {
 		
 		return list;
 	}
-	
+
+	public static void test1(int cport, int timeout, File downloadFolder, File uploadFolder){
+		System.out.println("---------Begin Test 1--------------");
+		System.out.println("------Testing with 10 clients------");
+		for (int i = 0; i < 10; i++) {
+			new Thread() {
+				public void run() {
+					testClient(cport, timeout, downloadFolder);
+					//classicTest(cport, timeout, downloadFolder, uploadFolder);
+
+				}
+			}.start();
+			if (i == 5) try {
+				Thread.sleep(3000);
+			} catch (Exception e){
+				System.out.println("Error when trying to sleep");
+			}
+		}
+		System.out.println("----------Ending Test 1------------");
+	}
+
+	public static void classicTest(int cport, int timeout, File downloadFolder, File uploadFolder) {
+
+		Client client = null;
+
+		try {
+			client = new Client(cport, timeout, Logger.LoggingType.ON_FILE_AND_TERMINAL);
+			client.connect();
+			Random random = new Random(System.currentTimeMillis() * System.nanoTime());
+
+			File fileList[] = uploadFolder.listFiles();
+			// /2
+			for (int i=0; i<fileList.length/2; i++) {
+				File fileToStore = fileList[random.nextInt(fileList.length)];
+				try {
+					client.store(fileToStore);
+				} catch (Exception e) {
+					System.out.println("Error storing file " + fileToStore);
+					e.printStackTrace();
+				}
+			}
+
+			String list[] = null;
+			try { list = list(client); } catch(IOException e) { e.printStackTrace(); }
+
+			// /4
+			for (int i = 0; i < list.length; i++) {
+				String fileToRemove = list[random.nextInt(list.length)];
+				try {
+					client.remove(fileToRemove);
+				} catch (Exception e) {
+					System.out.println("Error remove file " + fileToRemove);
+					e.printStackTrace();
+				}
+			}
+
+			try { list = list(client); } catch(IOException e) { e.printStackTrace(); }
+
+		} catch(IOException e) {
+			e.printStackTrace();
+		} finally {
+			if (client != null)
+				try { client.disconnect(); } catch(Exception e) { e.printStackTrace(); }
+		}
+	}
+
 }
