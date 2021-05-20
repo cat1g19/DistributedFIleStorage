@@ -57,6 +57,7 @@ public class Dstore{
                                 // receive command messages from the Controller
                                 String command;
                                 while ((command = bufferedReader.readLine()) != null){
+                                    DstoreLogger.getInstance().messageReceived(controllerSocket, command);
                                     String commandParts[] = command.split(" ");
                                     switch (commandParts[0]){
                                         case Protocol.REMOVE_TOKEN:
@@ -113,7 +114,7 @@ public class Dstore{
 
                                             String message;
                                             while ((message = clientBufferedReader.readLine()) != null){
-                                                System.out.println(message + " message received");
+                                                DstoreLogger.getInstance().messageReceived(clientSocket,message);
                                                 String[] msgParts = message.split(" ");
                                                 switch (msgParts[0]){
                                                     case Protocol.STORE_TOKEN:
@@ -178,7 +179,6 @@ public class Dstore{
             InputStream clientInputStream = clientSocket.getInputStream();
             PrintWriter printWriter = new PrintWriter(controllerSocket.getOutputStream());
 
-            DstoreLogger.getInstance().messageReceived(clientSocket,message);
             String filename = msgParts[1];
             int filesize = Integer.parseInt(msgParts[2]);
 
@@ -214,12 +214,13 @@ public class Dstore{
 
                         /**If not stored within the timeout successfully, logs the error.*/
                         if(!storedWithinTimeout) {
-                            System.err.println("Could not store \"" + filename + "\" within timeout!");
-                            DstoreLogger.getInstance().log("Could not store \"" + filename + "\" within timeout!");
+                            System.err.println("Could not store " + filename + " within timeout!");
+                            DstoreLogger.getInstance().log("Could not store " + filename + " within timeout!");
                         }
 
                     } catch(InterruptedException e) {
                         e.printStackTrace();
+                        DstoreLogger.getInstance().log("Could not store file");
                     }
                 } else {
                     System.out.println("File already exists.");
@@ -239,7 +240,6 @@ public class Dstore{
     public static void loadFile(Socket clientSocket, String[] messageParts) throws IOException {
         /**Checks if the message is formatted correctly.*/
         if (messageParts.length == 2) {
-            DstoreLogger.getInstance().messageReceived(clientSocket,messageParts[0] + " " + messageParts[1]);
             String filename = messageParts[1];
             File file = new File(directoryName, filename);
 
@@ -261,7 +261,6 @@ public class Dstore{
         PrintWriter controllerWriter = new PrintWriter(controllerSocket.getOutputStream());
         /**Checks if the message is formatted correctly.*/
         if (messageParts.length == 2) {
-            DstoreLogger.getInstance().messageReceived(controllerSocket, messageParts[0] + " " + messageParts[1]);
             String filename = messageParts[1];
             File file = new File(directoryName + File.separator + filename);
 

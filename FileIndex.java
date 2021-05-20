@@ -63,7 +63,6 @@ public class FileIndex {
         fileToStateTimer.put(filename, System.currentTimeMillis());
         fileToSize.put(filename,filesize);
         filesToDstores.put(filename, new Vector<>());
-        //filesToStateClients.put(filename, new Vector<>(Arrays.asList(clientSocket)));
         filesToStateClients.put(filename, clientSocket);
         filesToAcks.put(filename,new AtomicInteger(storingDataStores.size()));
         incrementDstores(storingDataStores);
@@ -97,7 +96,10 @@ public class FileIndex {
     }
 
     public boolean containsFile(String filename){
-        return fileToState.contains(filename);
+        if (fileToState.get(filename) == IndexState.STORE_IN_PROGRESS || fileToState.get(filename) == IndexState.STORE_COMPLETE || fileToState.get(filename) == IndexState.REMOVE_IN_PROGRESS) {
+            return true;
+        }
+        return false;
     }
 
     public void updateDstores(Socket dstore){
@@ -135,14 +137,16 @@ public class FileIndex {
     }
 
     public void update(){
-        long currentTime = System.currentTimeMillis();
-        List<String> expiredFiles = fileToStateTimer.entrySet().stream()
-                     .filter(entry -> currentTime - entry.getValue() >= timeout)
-                     .collect(Collectors.mapping(Map.Entry::getKey, Collectors.toList()));
+        //updateLock.writeLock().lock();
+            long currentTime = System.currentTimeMillis();
+            List<String> expiredFiles = fileToStateTimer.entrySet().stream()
+                    .filter(entry -> currentTime - entry.getValue() >= timeout)
+                    .collect(Collectors.mapping(Map.Entry::getKey, Collectors.toList()));
 
-        /**Sets expired states back to the default state.*/
-        expiredFiles.forEach(file -> expireState(file, fileToState.get(file)));
+            /**Sets expired states back to the default state.*/
+            expiredFiles.forEach(file -> expireState(file, fileToState.get(file)));
     }
+            //updateLock.writeLock().unlock();
 
     public void expireState(String filename, IndexState state){
         if (state != null) {

@@ -59,6 +59,7 @@ public class Controller {
                                 while ((message = bufferedReader.readLine()) != null) {
                                     //System.out.println(message + " message received");
                                     String[] messageParts = message.split(" ");
+                                    ControllerLogger.getInstance().messageReceived(client, message);
 
                                     Lock readLock = fileIndex.getUpdateLock().readLock();
                                     Lock writeLock = fileIndex.getUpdateLock().writeLock();
@@ -175,7 +176,6 @@ public class Controller {
 
     public static void dstoreJoins (Socket dstoreSocket, String[] messageParts) throws IOException{
         if (messageParts.length == 2){
-            ControllerLogger.getInstance().messageReceived(dstoreSocket,messageParts[0] + " " + messageParts[1]);
             int dstorePort = Integer.parseInt(messageParts[1]);
             ControllerLogger.getInstance().dstoreJoined(dstoreSocket,dstorePort);
             fileIndex.dstoreJoin(dstoreSocket);
@@ -191,11 +191,10 @@ public class Controller {
 
         if (enoughDstores()) {
             if (messageParts.length == 3) {
-                ControllerLogger.getInstance().messageReceived(clientSocket, messageParts[0] + " " + messageParts[1] + " " + messageParts[2]);
                 String filename = messageParts[1];
                 int filesize = Integer.parseInt(messageParts[2]);
 
-                if (!(fileIndex.getFileToState().get(filename) == FileIndex.IndexState.STORE_IN_PROGRESS) && !(fileIndex.getFileToState().get(filename) == FileIndex.IndexState.STORE_COMPLETE) ) {
+                if (!fileIndex.containsFile(filename)) {
                     StringBuilder clientResponse = new StringBuilder(Protocol.STORE_TO_TOKEN);
                     Vector<Socket> allocatedDstores = new Vector<>();
 
@@ -221,8 +220,7 @@ public class Controller {
                     }
                 }
             } else {
-                ControllerLogger.getInstance().log("Malformed STORE message from client port " + clientSocket.getLocalPort());
-                System.err.println("Malformed STORE message from client port " + clientSocket.getLocalPort());
+                ControllerLogger.getInstance().messageReceived(clientSocket,"Malformed STORE message");
             }
         } else{
             sendNotEnoughDstores(printWriter,clientSocket);
@@ -233,7 +231,6 @@ public class Controller {
 
     public static void storeAck (Socket dstoreSocket, String[] messageParts) throws IOException{
         if(messageParts.length == 2) {
-            ControllerLogger.getInstance().messageReceived(dstoreSocket, messageParts[0] + " " + messageParts[1]);
             String fileName = messageParts[1];
 
             //System.out.println(fileIndex.getFileToState().get(fileName));
@@ -243,7 +240,7 @@ public class Controller {
                 /**Updates the index and decrements the required acknowledgements.*/
                 fileIndex.getFilesToDstores().get(fileName).add(dstoreSocket);
                 fileIndex.getDstoresToFiles().get(dstoreSocket).add(fileName);
-                fileIndex.getDstoresToNoOfFiles().put(dstoreSocket,fileIndex.getDstoresToFiles().get(dstoreSocket).size());
+                //fileIndex.getDstoresToNoOfFiles().put(dstoreSocket,fileIndex.getDstoresToFiles().get(dstoreSocket).size());
 
                 /**Checks if an appropriate number of STORE_ACKs have been processed.
                  * If so, updates the state of the file to the default state in the file index.*/
@@ -293,7 +290,6 @@ public class Controller {
 
         if (enoughDstores()) {
             if (messageParts.length == 2) {
-                ControllerLogger.getInstance().messageReceived(clientSocket,messageParts[0] + " " + messageParts[1]);
                 String fileName = messageParts[1];
                 clientSocket.setSoTimeout(timeout);
 
@@ -332,12 +328,10 @@ public class Controller {
         if (enoughDstores()){
             /**Checks if the message is formatted correctly.*/
             if(messageParts.length == 2) {
-                ControllerLogger.getInstance().messageReceived(clientSocket, messageParts[0] + " " + messageParts[1]);
                 String fileName = messageParts[1];
-                clientSocket.setSoTimeout(timeout);
 
                 /**Checks if the file can be reloaded according to the file index.*/
-                if(fileIndex.containsFile(fileName)) {
+                if(fileIndex.getFileToState().get(fileName) == FileIndex.IndexState.STORE_COMPLETE) {
                     /**Gets the Dstores the client has already tried to load from.*/
                     List<Socket> loadAttempts = fileIndex.getLoadAttempts().get(clientSocket).get(fileName);
                     /**Gets one of the Dstores the client hasn't loaded from that contains the file.*/
@@ -349,7 +343,7 @@ public class Controller {
                     /**Checks if there is a remaining Dstore, if so, sends its port and adds the Dstore to the consumed list.
                      * If not, removes the load attempts for the file from the map for the client.*/
                     if(nextDstore != null) {
-                        loadAttempts.add(nextDstore);
+                        fileIndex.getLoadAttempts().get(clientSocket).get(fileName).add(nextDstore);
                         clientWriter.println(Protocol.LOAD_FROM_TOKEN + " " + dstoreSocketToPortNo.get(nextDstore) + " " + fileIndex.getFileToSize().get(fileName));
                         clientWriter.flush();
                         ControllerLogger.getInstance().messageSent(clientSocket,Protocol.LOAD_FROM_TOKEN + " " + dstoreSocketToPortNo.get(nextDstore) + " " + fileIndex.getFileToSize().get(fileName));
@@ -379,9 +373,9 @@ public class Controller {
 
     public static void listFiles(Socket clientSocket, String[] messageParts) throws IOException{
         PrintWriter clientWriter = new PrintWriter(clientSocket.getOutputStream());
+
         if (enoughDstores()){
             if(messageParts.length == 1) {
-                ControllerLogger.getInstance().messageReceived(clientSocket, messageParts[0]);
                 StringBuilder clientResponse = new StringBuilder(Protocol.LIST_TOKEN);
                 fileIndex.getFileToState().keySet().stream()
                         .filter(fileName -> fileIndex.getFileToState().get(fileName) == FileIndex.IndexState.STORE_COMPLETE)
@@ -404,10 +398,10 @@ public class Controller {
 
     public static void removeFile(Socket clientSocket, String[] messageParts) throws IOException{
         PrintWriter clientWriter = new PrintWriter(clientSocket.getOutputStream());
+
         if (enoughDstores()){
             /**Checks if the message is formatted correctly.*/
             if(messageParts.length == 2) {
-                ControllerLogger.getInstance().messageReceived(clientSocket, messageParts[0] + " " + messageParts[1]);
                 String fileName = messageParts[1];
 
                 /**Checks if the file can be removed according to the file index.*/
@@ -441,9 +435,9 @@ public class Controller {
     }
 
     public static void removeAck(Socket dstoreSocket, String[] messageParts) throws IOException{
+
         /**Checks if the message is formatted correctly.*/
         if(messageParts.length == 2) {
-            ControllerLogger.getInstance().messageReceived(dstoreSocket, messageParts[0] + " " + messageParts[1]);
             String fileName = messageParts[1];
 
             /**Checks if the file is being removed.*/
@@ -480,6 +474,7 @@ public class Controller {
             } else{
                 dstoreSocketToPortNo.remove(dstore);
                 fileIndex.updateDstores(dstore);
+                ControllerLogger.getInstance().log("Dstore with port " + dstore.getPort() + " disconnected");
             }
         }
         return n >= replicationFactor;
